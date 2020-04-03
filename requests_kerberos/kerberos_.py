@@ -291,7 +291,7 @@ class HTTPKerberosAuth(AuthBase):
             log.debug("handle_401(): returning {0}".format(response))
             return response
 
-    def handle_other(self, response):
+    def handle_other(self, response, **kwargs):
         """Handles all responses with the exception of 401s.
 
         This is necessary so that we can authenticate responses if requested"""
@@ -408,7 +408,7 @@ class HTTPKerberosAuth(AuthBase):
             log.debug("handle_response(): returning 401 %s", response)
             return response
         else:
-            _r = self.handle_other(response)
+            _r = self.handle_other(response, **kwargs)
             log.debug("handle_response(): returning %s", _r)
             return _r
 
@@ -470,3 +470,34 @@ class HTTPKerberosProxyAuth(HTTPKerberosAuth):
     def authenticate_user(self, response, auth_header_name='Authorization', **kwargs):
         return super(HTTPKerberosProxyAuth, self).authenticate_user(response, auth_header_name='Proxy-Authorization',
                                                              **kwargs)
+    def handle_other(self, response, **kwargs):
+        """Takes the given response and tries kerberos-auth, as needed."""
+        num_407s = kwargs.pop('num_407s', 0)
+
+        # needs to handle the 407 response code given by proxies when they require authentication
+        if response.status_code == 407 and num_407s < 2:
+            # 407 Proxy-Authenticate. Handle it, and if it still comes back as 407,
+            # that means authentication failed.
+            _r = self.handle_407(response, **kwargs)
+            log.debug("handle_response(): returning %s", _r)
+            log.debug("handle_response() has seen %d 407 responses", num_407s)
+            num_407s += 1
+            return self.handle_other(_r, num_407s=num_407s, **kwargs)
+        elif response.status_code == 407 and num_407s >= 2:
+            # Still receiving 407 responses after attempting to handle them.
+            # Authentication has failed. Return the 407 response.
+            log.debug("handle_response(): returning 407 %s", response)
+            return response
+
+    def handle_407(self, response, **kwargs):
+        """Handles 407's, equivalent of 401s for proxies"""
+
+        log.debug("handle_407(): Handling: 407")
+        if _negotiate_value(response) is not None:
+            _r = self.authenticate_user(response, **kwargs)
+            log.debug("handle_407(): returning {0}".format(_r))
+            return _r
+        else:
+            log.debug("handle_407(): Kerberos is not supported")
+            log.debug("handle_407(): returning {0}".format(response))
+            return response
