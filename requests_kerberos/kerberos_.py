@@ -252,7 +252,7 @@ class HTTPKerberosAuth(AuthBase):
             log.error("generate_request_header(): {0}".format(message))
             raise KerberosExchangeError(message)
 
-    def authenticate_user(self, response, **kwargs):
+    def authenticate_user(self, response, auth_header_name= 'Authorization', **kwargs):
         """Handles user authentication with gssapi/kerberos"""
 
         host = urlparse(response.url).hostname
@@ -263,9 +263,9 @@ class HTTPKerberosAuth(AuthBase):
             # GSS Failure, return existing response
             return response
 
-        log.debug("authenticate_user(): Authorization header: {0}".format(
-            auth_header))
-        response.request.headers['Authorization'] = auth_header
+        log.debug("authenticate_user(): {0} header: {1}".format(
+            auth_header_name, auth_header))
+        response.request.headers[auth_header_name] = auth_header
 
         # Consume the content so we can reuse the connection for the next
         # request.
@@ -450,3 +450,23 @@ class HTTPKerberosAuth(AuthBase):
             # None.
             self.pos = None
         return request
+
+class HTTPKerberosProxyAuth(HTTPKerberosAuth):
+
+    def __call__(self, request):
+
+        auth_header_name = 'Authorization'
+
+        prev_auth_header = request.headers.get(auth_header_name)
+        request = super(HTTPKerberosProxyAuth, self).__call__(request)
+
+        if prev_auth_header != request.headers.get(auth_header_name):
+            # move the authorization header to the proxy-authorization header
+            request.headers['Proxy-Authorization'] = request.headers.get(auth_header_name)
+            del request.headers[auth_header_name]
+
+        return request
+
+    def authenticate_user(self, response, auth_header_name='Authorization', **kwargs):
+        return super(HTTPKerberosProxyAuth, self).authenticate_user(response, auth_header_name='Proxy-Authorization',
+                                                             **kwargs)

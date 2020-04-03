@@ -104,6 +104,36 @@ class KerberosTestCase(unittest.TestCase):
 
             self.assertTrue('Authorization' not in request.headers)
 
+    def test_proxy_auth_no_force_preemptive(self):
+        with patch.multiple(kerberos_module_name,
+                            authGSSClientInit=clientInit_complete,
+                            authGSSClientResponse=clientResponse,
+                            authGSSClientStep=clientStep_continue):
+            auth = requests_kerberos.HTTPKerberosProxyAuth()
+
+            request = requests.Request(url="http://www.example.org")
+
+            auth.__call__(request)
+
+            self.assertTrue('Proxy-Authorization' not in request.headers)
+            self.assertTrue('Authorization' not in request.headers)
+
+    def test_proxy_auth_with_force_preemptive(self):
+        with patch.multiple(kerberos_module_name,
+                            authGSSClientInit=clientInit_complete,
+                            authGSSClientResponse=clientResponse,
+                            authGSSClientStep=clientStep_continue):
+            auth = requests_kerberos.HTTPKerberosProxyAuth(force_preemptive=True)
+
+            request = requests.Request(url="http://www.example.org")
+
+            auth.__call__(request)
+
+            self.assertTrue('Authorization' not in request.headers)
+
+            self.assertTrue('Proxy-Authorization' in request.headers)
+            self.assertEqual(request.headers.get('Proxy-Authorization'), 'Negotiate GSSRESPONSE')
+
     def test_generate_request_header(self):
         with patch.multiple(kerberos_module_name,
                             authGSSClientInit=clientInit_complete,
@@ -205,6 +235,56 @@ class KerberosTestCase(unittest.TestCase):
             self.assertEqual(
                 request.headers['Authorization'],
                 'Negotiate GSSRESPONSE')
+            connection.send.assert_called_with(request)
+            raw.release_conn.assert_called_with()
+            clientInit_complete.assert_called_with(
+                "HTTP@www.example.org",
+                gssflags=(
+                    kerberos.GSS_C_MUTUAL_FLAG |
+                    kerberos.GSS_C_SEQUENCE_FLAG),
+                principal=None)
+            clientStep_continue.assert_called_with("CTX", "token")
+            clientResponse.assert_called_with("CTX")
+
+
+    def test_authenticate_user_for_proxy_has_same_behavior(self):
+        with patch.multiple(kerberos_module_name,
+                            authGSSClientInit=clientInit_complete,
+                            authGSSClientResponse=clientResponse,
+                            authGSSClientStep=clientStep_continue):
+
+            response_ok = requests.Response()
+            response_ok.url = "http://www.example.org/"
+            response_ok.status_code = 200
+            response_ok.headers = {'www-authenticate': 'negotiate servertoken'}
+
+            connection = Mock()
+            connection.send = Mock(return_value=response_ok)
+
+            raw = Mock()
+            raw.release_conn = Mock(return_value=None)
+
+            request = requests.Request()
+            response = requests.Response()
+            response.request = request
+            response.url = "http://www.example.org/"
+            response.headers = {'www-authenticate': 'negotiate token'}
+            response.status_code = 401
+            response.connection = connection
+            response._content = ""
+            response.raw = raw
+            auth = requests_kerberos.HTTPKerberosProxyAuth()
+            r = auth.authenticate_user(response)
+
+            self.assertTrue(response in r.history)
+            self.assertEqual(r, response_ok)
+            print(request.headers)
+            self.assertEqual(
+                request.headers['Proxy-Authorization'],
+                'Negotiate GSSRESPONSE')
+            self.assertNotIn(
+                'Authorization',
+                request.headers)
             connection.send.assert_called_with(request)
             raw.release_conn.assert_called_with()
             clientInit_complete.assert_called_with(

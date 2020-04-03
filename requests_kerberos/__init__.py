@@ -14,12 +14,12 @@ The entire `requests.api` should be supported.
 """
 import logging
 
-from .kerberos_ import HTTPKerberosAuth, REQUIRED, OPTIONAL, DISABLED
+from .kerberos_ import HTTPKerberosAuth, HTTPKerberosProxyAuth, REQUIRED, OPTIONAL, DISABLED
 from .exceptions import MutualAuthenticationError
 from .compat import NullHandler
 
 logging.getLogger(__name__).addHandler(NullHandler())
 
-__all__ = ('HTTPKerberosAuth', 'MutualAuthenticationError', 'REQUIRED',
+__all__ = ('HTTPKerberosAuth', 'HTTPKerberosProxyAuth', 'MutualAuthenticationError', 'REQUIRED',
            'OPTIONAL', 'DISABLED')
 __version__ = '0.13.0.dev0'
